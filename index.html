@@ -508,8 +508,8 @@ async function runAll(){
           var pd=await rfetch('product',products[di].asin,null,null);
           if(pd&&pd.product){
             var pr=pd.product;
-            if(pr.rating)products[di].rating=pr.rating;
-            if(pr.ratings_total)products[di].review_count=pr.ratings_total;
+            var prRat=parseRating(pr.rating);if(prRat>0)products[di].rating=prRat;
+            var prRev=parseReviews(pr.ratings_total);if(prRev>0)products[di].review_count=prRev;
             var brl=pr.bestsellers_rank||[];
             if(brl.length){products[di].bsr=brl[0].rank||0;products[di].monthly_sales_est=bsr2s(products[di].bsr);}
             if(pr.categories_flat)products[di].category=pr.categories_flat;
@@ -552,19 +552,43 @@ function checkResp(d){
   return null;
 }
 
+// Rating'i sağlam biçimde çöz. Sayı ise doğrudan kullan. Metin ise Türkçe/İngilizce
+// "5 üzerinden 4,6" / "4.6 out of 5" kalıplarını ve virgüllü ondalığı çöz.
+// (Aksi halde parseFloat("5 üzerinden 4,6") baştaki 5'i kapar → herkese 5 yıldız çıkardı.)
+function parseRating(v){
+  if(typeof v==='number')return(v>0&&v<=5)?v:0;
+  if(v==null)return 0;
+  var s=String(v).trim();if(!s)return 0;
+  // Türkçe: "5 üzerinden 4,6" → üzerinden SONRASI gerçek puandır
+  var tr=s.match(/üzerinden\s*([\d]+(?:[.,]\d+)?)/i);
+  if(tr)return clampRating(tr[1]);
+  // İngilizce: "4.6 out of 5" veya "4.6 / 5" → öncesi gerçek puandır
+  var en=s.match(/([\d]+(?:[.,]\d+)?)\s*(?:out of|\/)/i);
+  if(en)return clampRating(en[1]);
+  // Düz değer (ör. "4,6" veya "4.6")
+  return clampRating(s);
+}
+function clampRating(s){var f=parseFloat(String(s).replace(',', '.'));return(f>0&&f<=5)?f:0;}
+// Yorum sayısı: Türkçe binlik ayırıcı "." ile gelebilir ("42.742") → tüm rakam-dışını at.
+// (Aksi halde parseInt("42.742") = 42 olurdu.)
+function parseReviews(v){
+  if(typeof v==='number')return v>0?Math.round(v):0;
+  if(v==null)return 0;
+  var n=parseInt(String(v).replace(/[^\d]/g,''),10);
+  return n>0?n:0;
+}
+
 function mapP(x,st,sl){
   var domain=document.getElementById('dom').value;
   var asin=x.asin||'';
   // Rating birden fazla alanda gelebilir; ilk geçerli (>0) olanı al
-  var rat=parseFloat(x.rating);
-  if(!(rat>0)&&x.rating_breakdown&&x.rating_breakdown.rating)rat=parseFloat(x.rating_breakdown.rating);
-  if(!(rat>0)&&typeof x.stars!=='undefined')rat=parseFloat(x.stars);
-  if(!(rat>0))rat=0;
+  var rat=parseRating(x.rating);
+  if(!(rat>0)&&x.rating_breakdown&&x.rating_breakdown.rating)rat=parseRating(x.rating_breakdown.rating);
+  if(!(rat>0)&&typeof x.stars!=='undefined')rat=parseRating(x.stars);
   // Yorum sayısı da farklı alanlarda olabilir
-  var rev=parseInt(x.ratings_total);
-  if(!(rev>0)&&typeof x.reviews_total!=='undefined')rev=parseInt(x.reviews_total);
-  if(!(rev>0)&&typeof x.reviews!=='undefined')rev=parseInt(x.reviews);
-  if(!(rev>0))rev=0;
+  var rev=parseReviews(x.ratings_total);
+  if(!(rev>0)&&typeof x.reviews_total!=='undefined')rev=parseReviews(x.reviews_total);
+  if(!(rev>0)&&typeof x.reviews!=='undefined')rev=parseReviews(x.reviews);
   return{asin:asin,title:(x.title||'').slice(0,150),url:x.link||('https://www.'+domain+'/dp/'+asin),
     rating:rat,review_count:rev,price:fmtP(x.price),price_num:(x.price&&x.price.value)||0,
     sponsored:x.is_sponsored||false,bsr:0,monthly_sales_est:0,category:'',st:st,sl:sl,
